@@ -1,5 +1,7 @@
 .venv/
 .lab28/
+docker/airflow/offline/*
+!docker/airflow/offline/.gitkeep
 __pycache__/
 *.pyc
 .pytest_cache/

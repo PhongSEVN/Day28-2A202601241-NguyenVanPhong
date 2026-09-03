@@ -1,7 +1,12 @@
 FROM apache/airflow:3.3.1-python3.12
 
 COPY --chown=airflow:root docker/airflow/requirements.txt /tmp/lab28-requirements.txt
-RUN pip install --no-cache-dir -r /tmp/lab28-requirements.txt
+# Offline wheel/sdist cache for large packages (pyspark is a 450 MB sdist).
+# Populated on the host by scripts/fetch_airflow_offline.sh so a flaky link does
+# not restart the download from zero on every build.
+COPY --chown=airflow:root docker/airflow/offline/ /tmp/offline/
+RUN pip install --no-cache-dir --retries 10 --timeout 120 \
+      --find-links /tmp/offline -r /tmp/lab28-requirements.txt
 
 COPY --chown=airflow:root pyproject.toml README.md /opt/lab28/
 COPY --chown=airflow:root src /opt/lab28/src
