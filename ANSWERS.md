@@ -151,7 +151,13 @@ Feast là tùy chọn (feature nguội làm giảm chất lượng, không làm 
 
 ## 11. Điều khó nhất
 
-_(viết 3–5 câu: phần nào tốn thời gian nhất, vì sao — ví dụ: hiểu vì sao `dedupe_latest` pass test riêng nhưng fail test Delta / phân biệt `not_ready` vs `degraded` / dựng full stack trên mạng yếu.)_
+Bốn hàm starter thì em viết khá nhanh. Chỗ duy nhất phải dừng lại suy nghĩ là `dedupe_latest`: lúc đầu test riêng của nó pass nhưng test Delta lại đỏ, mãi em mới nhận ra mình đang coi `IngestionEvent` như dict trong khi nó là object, và em chỉ so `occurred_at` nên khi hai bản tin trùng thời điểm thì kết quả phụ thuộc vào thứ tự Kafka trả về. Sửa lại thành so cặp `(occurred_at, event_id)` rồi sort theo key thì mới ổn định.
+
+Phần thật sự mất thời gian là dựng full stack và nối vLLM. Máy em mạng yếu nên build image Airflow cứ chết giữa chừng vì pip tải `pyspark` bản nguồn 450 MB không bao giờ xong, tải lại từ đầu mỗi lần. Có lần em lỡ chạy hai tiến trình tải cùng lúc, file phình to hơn cả bản gốc và hỏng luôn. Cuối cùng em phải tải sẵn một lần trên máy có resume rồi cho Dockerfile đọc file local thay vì kéo từ mạng.
+
+Nối vLLM trên Kaggle còn rối hơn. RTX 3050 của em chỉ 4 GB VRAM nên không chạy nổi model, phải đẩy sang GPU T4 của Kaggle. Lúc đó mới dính một chuỗi lệch phiên bản: bản vllm mới kéo về torch dựng cho CUDA 13 trong khi Kaggle đang là CUDA 12, hạ vllm xuống thì lại vỡ ở tokenizer vì thư viện transformers quá mới, phải ghim đúng transformers 4.55.4. T4 cũng cũ nên vllm tự lùi về engine V0. Đến khi endpoint chạy được rồi thì request hỏi đáp vẫn timeout, vì client trong container để mặc định 30 giây, không đủ cho một request đi vòng qua Cloudflare tunnel tới Kaggle rồi mới sinh chữ trên T4; em phải cho compose truyền `LAB28_VLLM_TIMEOUT` vào service api và nâng lên 120 giây.
+
+Điều em rút ra là các tầng phải khớp nhau về phiên bản và cả về độ trễ: torch với CUDA, vllm với transformers, timeout với đường mạng thực tế. Một tầng báo chạy được không có nghĩa là tầng kế tiếp sẽ chạy.
 
 ---
 
