@@ -51,10 +51,13 @@ Baseline sạch không tunnel: `pytest integration-tests -m "not gpu and not lan
 
 ## 3. Luồng đúng (happy path) — IDs để đối chiếu
 
-- DAG run: `it-0a60aa6d` — state `success`
-- Trace ID: `ee805d08234d4a37ae18512a79babc01`
-- Delta `feedback` version: `9` (MERGE, 1 inserted, 0 copied → replay-safe)
-- MLflow: `lab28-rag-release`, champion đã chạy `v1 → v2 → v3`, run mới nhất `0d10c5c9136b4c0d82bd3f2a44206c4e`, `delta_version=9`
+Từ lần chạy `pytest integration-tests -m "not langsmith"` với vLLM thật:
+
+- Trace ID: `d55a93329910402595452612d3263b3b` — `evidence/ip10-trace.json`, 25 span, `required_spans_missing: []`, đủ 11 span bắt buộc gồm nhánh serving (`lab28.api.ask`, `lab28.feast.get_online_features`, `lab28.qdrant.query`, `lab28.mlflow.resolve_release`, `lab28.vllm.chat_completion`)
+- DAG run: `it-9128c41e` — state `success`, 4 task success (`evidence/ip02-airflow-run.json`); DAG run trong trace đầy đủ: `it-35f3f21e`
+- Delta version: `feedback` v17, `documents` v10 — MERGE, replay-safe (`evidence/ip03-delta-history.json`)
+- MLflow: `lab28-rag-release`, champion `v3` (chuỗi `v1 → v2 → v3`), run `0d10c5c9136b4c0d82bd3f2a44206c4e` (`evidence/ip06-mlflow-release.json`)
+- vLLM: `Qwen/Qwen3-1.7B`, vLLM `0.10.1.1`, 61 metric `vllm:` (`evidence/ip07-vllm-identity.json`)
 - Embedding model: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2@faf4aa4225822f3bc6376869cb1164e8e3feedd0`
 
 ---

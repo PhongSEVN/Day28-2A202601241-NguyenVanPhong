@@ -1,0 +1,15 @@
+{
+  "note": "Two profiles: through the Envoy gateway (:8080) and direct to the API (:8000). GET /ready, 200 requests, 8 workers.",
+  "gateway_8080": {
+    "requests": 200, "workers": 8,
+    "status_counts": {"200": 32, "0": 168},
+    "status_0_meaning": "urllib raises on non-2xx; these are HTTP 429 local_rate_limited from the Envoy local rate limiter (IP08, intentionally low for the demo)",
+    "latency_ms": {"p50": 5.95, "p95": 506.54, "p99": 725.01}
+  },
+  "api_direct_8000": {
+    "requests": 200, "workers": 8,
+    "status_counts": {"200": 200},
+    "latency_ms": {"p50": 487.13, "p95": 754.73, "p99": 1168.09}
+  },
+  "bottleneck": "Gateway path is rate-limit bound by design (429s). Direct path is 100% success; latency is dominated by /ready probing every dependency synchronously on each call, and the vLLM probe adds tail latency because it hits ConnectError (no real vLLM connected). With a real vLLM endpoint or an async/cached readiness the p50 drops well below 487 ms."
+}
