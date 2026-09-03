@@ -30,14 +30,22 @@ Kiểm chứng: `starter-tests` + `tests` 83 passed, `ruff` sạch.
 | IP04 Delta → Feast | ✅ | `evidence/ip04-feast-online.json` — online row có `delta_version` + freshness |
 | IP05 Delta → Qdrant | ✅ | `evidence/ip05-qdrant-search.json` — hybrid query, `points_upserted=13`, ID tất định từ `doc_id` |
 | IP06 Eval → MLflow Registry | ✅ | `evidence/ip06-mlflow-release.json` — `lab28-rag-release` champion, signature + provenance |
-| IP07 Prompt → vLLM thật | ❌ **UNVERIFIED** | Không có endpoint GPU. `probe_vllm` = `unreachable: ConnectError`. Không giả lập theo yêu cầu đề. |
+| IP07 Prompt → vLLM thật | ✅ **VERIFIED** | vLLM 0.10.1.1 thật trên Kaggle T4 (`Qwen/Qwen3-1.7B`), gọi qua Cloudflare quick tunnel. `evidence/ip07-vllm-identity.json`: `/version` = `0.10.1.1`, `/v1/models` = `Qwen/Qwen3-1.7B`, 61 metric `vllm:`, `is_real_vllm: true`. Completion thật trong J1/J3 (`llm_ms ≈ 9000`). Không giả lập. |
 | IP08 Client → Envoy gateway | ✅ | `evidence/ip08-gateway.json` — 200 + 429 (`local_rate_limited`) kèm `x-request-id` |
-| IP09 Components → Prometheus/Grafana | ✅ | `evidence/ip09-prometheus-targets.json`, `ip09-grafana-dashboards.json` |
-| IP10 Components → OTLP trace | ⚠️ **một phần** | `evidence/ip10-trace.json` — 6/11 span (nhánh ingestion đủ: gateway/api.ingest/kafka.produce/kafka.consume/airflow.dag/spark.delta_merge). Thiếu 5 span serving (`api.ask`, `feast.get_online_features`, `mlflow.resolve_release`, `qdrant.query`, `vllm.chat_completion`) vì cần 1 request `/ask` qua vLLM thật trong cùng trace. LangSmith leg: `UNVERIFIED` (không có `LANGSMITH_API_KEY`). |
+| IP09 Components → Prometheus/Grafana | ✅ | `evidence/ip09-prometheus-targets.json`, `ip09-grafana-dashboards.json`. Lưu ý: target vLLM `host.docker.internal:8001` báo `down` khi dùng endpoint Kaggle remote — không cấu scrape proxy cho tunnel, không commit URL. |
+| IP10 Components → OTLP trace | ✅ **đủ span** | `evidence/ip10-trace.json` — 25 span, `missing: []`, đủ 11 span bắt buộc gồm `lab28.vllm.chat_completion`, `lab28.api.ask`, `lab28.feast.get_online_features`, `lab28.qdrant.query`, `lab28.mlflow.resolve_release`. LangSmith leg: `UNVERIFIED` (không có `LANGSMITH_API_KEY`). |
 
-`lab28 integration`: score 83, 5/6 verified passing, `ready:false` (do IP07).
+`lab28 integration`: **score 100, `ready: true`** — 6/6 verified passing (IP01/03/04/05/06/07). IP02/08/09/10 lệnh này đánh dấu `unverified` theo thiết kế (chỉ probe từ serving process), chứng minh bằng evidence file + test suite.
 
-Journeys: J1 12 passed / 3 skip (gpu), J2 9 passed, suite non-gpu 56 passed.
+Journeys với vLLM thật: **68 passed / 3 failed** (`pytest integration-tests -m "not langsmith"`). 3 fail đều do topology tunnel remote, không phải lỗi code:
+
+| Test fail | Nguyên nhân |
+|---|---|
+| `j4 ...gateway_stops_routing_to_a_pod_that_is_not_ready` | J4 inject lỗi bằng cách dừng container vLLM local — vLLM ở Kaggle nên không tái hiện được failure đó |
+| `prometheus ...inference_endpoint_is_scraped` | Prometheus scrape `host.docker.internal:8001` (target local) — vLLM ở Kaggle → target `down` |
+| `trace ...spans_the_processes` | Đòi ≥4 tên service trong trace, được 3 (`airflow/api/gateway`) — vLLM remote không tự phát span OTLP qua tunnel; span `lab28.vllm.chat_completion` vẫn có (client span của `api`) |
+
+Baseline sạch không tunnel: `pytest integration-tests -m "not gpu and not langsmith"` = 56 passed. J1 12 / J2 9 (không GPU).
 
 ---
 
@@ -63,9 +71,10 @@ J2 `test_j2_idempotent_replay.py` — 9 passed. Gửi lại cùng lô: Delta tab
 
 - **Tạo:** cho một dependency **không bắt buộc** (Feast) lỗi.
 - **Dự đoán dấu hiệu:** `/ready` = `degraded` (không `not_ready`), `lab28_component_ready{name="feast"}=0`, câu trả lời vẫn trả về nhưng `evidence.degraded=true`.
-- **Quan sát:** `test_j4_degraded_recovery.py` pass — hệ thống trả lời ở chế độ degraded, không 5xx.
+- **Quan sát:** `test_j4_degraded_recovery.py` pass ở baseline non-gpu (56 passed) — hệ thống trả lời ở chế độ degraded, không 5xx.
 - **Khôi phục:** dependency lên lại → `/ready` = `ready`, không thao tác thủ công.
 - **Không mất dữ liệu:** event trong lúc lỗi vẫn nằm ở Kafka (`data.raw` retention 7 ngày); DAG chạy lại drain vào Delta; số row đúng.
+- **Lưu ý tunnel:** biến thể `test_the_gateway_stops_routing_to_a_pod_that_is_not_ready` fail khi vLLM ở Kaggle vì nó inject lỗi bằng cách dừng container vLLM local. Kịch bản degraded/recovery vẫn chứng minh đầy đủ ở baseline non-gpu.
 
 ### 5b. Sự cố thật gặp khi dựng lab (bonus)
 
@@ -85,7 +94,8 @@ J2 `test_j2_idempotent_replay.py` — 9 passed. Gửi lại cùng lô: Delta tab
 | Direct API `:8000` | 200 | 0 | 487 ms | 755 ms | 1168 ms |
 
 - Qua gateway: **rate-limit bound** — Envoy `local_rate_limit` (IP08) đặt thấp có chủ đích để demo 429. `urllib` raise trên 429 nên script ghi status `0`.
-- Direct API: 100% thành công. Latency bị chi phối bởi `/ready` **probe mọi dependency đồng bộ mỗi lần gọi**; probe vLLM thêm đuôi latency vì đang `ConnectError`. Có vLLM thật hoặc readiness async/cache → p50 tụt sâu dưới 487 ms.
+- Direct API: 100% thành công. Latency bị chi phối bởi `/ready` **probe mọi dependency đồng bộ mỗi lần gọi**; probe vLLM (giờ là tunnel Kaggle) đóng góp đuôi latency ~1 hop qua Cloudflare. Readiness async/cache → p50 tụt sâu dưới 487 ms.
+- Latency `/api/v1/ask` với vLLM thật: `llm_ms ≈ 9000`, `total_ms ≈ 9300` (trace J3) — chi phối bởi generation trên T4 + hop tunnel.
 - Không thấy memory leak khi chạy J1–J5 + load nhiều lần; container giữ `healthy`.
 
 ---
@@ -119,18 +129,23 @@ Feast là tùy chọn (feature nguội làm giảm chất lượng, không làm 
 2. **`dedupe_latest` sort toàn bộ theo key.** Được: MERGE source tất định, dễ test. Mất: O(n log n) + giữ cả batch trong RAM — batch rất lớn cần streaming/partition.
 3. **ID tất định (`uuid5`) cho Qdrant/Delta thay vì hash nội dung.** Được: replay ghi đè đúng 1 điểm. Mất: sửa nội dung cùng `doc_id` vẫn là 1 điểm — cần bump khóa khi đổi nghĩa.
 4. **Pre-fetch pyspark vào build context.** Được: build airflow chịu được mạng yếu. Mất: thêm 1 bước host + blob 450 MB ngoài repo (phải chạy `scripts/fetch_airflow_offline.sh` trước khi build ở máy mới).
+5. **vLLM inference đẩy sang Kaggle T4 qua tunnel, không chạy local.** Được: verify IP07 bằng vLLM thật dù laptop chỉ có RTX 3050 4 GB (không đủ cho `Qwen3-1.7B` fp16). Mất: phụ thuộc session/quota Kaggle, latency thêm 1 hop, 3 test topology fail (mục 10). `compose.gpu.yaml` cho local vẫn giữ nguyên để chạy được khi có GPU đủ VRAM.
 
 ---
 
 ## 10. Production gaps — sẽ cải tiến khi triển khai thật
 
-1. **IP07 chưa verify** — chưa có vLLM GPU thật. Prod: endpoint vLLM có health `/version` + metric `vllm:` thật, gắn vào `/ready` khi `require_real=true`.
-2. **IP10 trace chưa trọn** — trace hiện chỉ phủ nhánh ingestion. Cần 1 trace mang đủ 11 span gồm nhánh `/ask` (feast/qdrant/mlflow/vllm). Phụ thuộc (1).
-3. **`/ready` probe đồng bộ mọi lần gọi** → p50 ~487 ms. Prod: cache kết quả probe (TTL ngắn) hoặc probe nền, `/ready` chỉ đọc trạng thái.
-4. **Kafka RF=1, 1 broker; Spark driver 1g** — cấu hình lab. Prod: RF≥3, resource thật, `MAX_ACTIVE_RUNS_PER_DAG` cân theo throughput.
-5. **CLI lỗi trên Windows** — `lab28 integration` in JSON có ký tự `→` ra stdout cp1252 → `UnicodeEncodeError`. Workaround: `$env:PYTHONUTF8=1`. Fix thật: CLI ép `sys.stdout` reconfigure UTF-8.
-6. **Envoy local rate limit rất thấp** — tốt để demo 429, nhưng che mất số liệu throughput thật của app. Prod: tách limit demo và limit thật.
-7. **`evidence/` bị `.gitignore`** — nộp evidence bundle riêng (không commit vào repo).
+1. **vLLM qua Cloudflare quick tunnel** — IP07 đã verify nhưng endpoint là tunnel tạm: session Kaggle ≤ 12h, quota GPU 30h/tuần, URL `trycloudflare` đổi mỗi lần restart (để `ports.local`, không commit). Hết session = IP07 `not_ready`. Prod: vLLM co-located hoặc named tunnel + service mesh.
+2. **3 test fail do topology tunnel** (không phải lỗi code):
+   - `j4 ...pod_that_is_not_ready`: J4 dừng container vLLM local để inject lỗi — vLLM remote không tái hiện được.
+   - `prometheus ...inference_endpoint_is_scraped`: Prometheus scrape target local `host.docker.internal:8001` → `down` với endpoint Kaggle. Prod: scrape proxy/federation tới endpoint remote.
+   - `trace ...spans_the_processes`: đòi ≥4 tên service — vLLM remote không phát span OTLP riêng qua tunnel (span `lab28.vllm.chat_completion` vẫn có, là client span của `api`). Prod: vLLM export OTLP về collector chung.
+3. **`LAB28_VLLM_TIMEOUT` mặc định 30s** — không đủ cho endpoint tunnel (RTT laptop→Cloudflare→Kaggle). Đã thêm passthrough vào `compose.yaml` api service + set `120` ở `ports.local`. Prod: timeout theo SLO endpoint thật, thêm retry/circuit-breaker.
+4. **`/ready` probe đồng bộ mọi lần gọi** → p50 ~487 ms. Prod: cache kết quả probe (TTL ngắn) hoặc probe nền, `/ready` chỉ đọc trạng thái.
+5. **Kafka RF=1, 1 broker; Spark driver 1g** — cấu hình lab. Prod: RF≥3, resource thật, `MAX_ACTIVE_RUNS_PER_DAG` cân theo throughput.
+6. **CLI lỗi trên Windows** — `lab28 integration` in JSON có ký tự `→` ra stdout cp1252 → `UnicodeEncodeError`. Workaround: `$env:PYTHONUTF8=1`. Fix thật: CLI ép `sys.stdout` reconfigure UTF-8.
+7. **Envoy local rate limit rất thấp** — tốt để demo 429, nhưng che mất số liệu throughput thật của app. Prod: tách limit demo và limit thật.
+8. **`evidence/` bị `.gitignore`** — nộp evidence bundle riêng (không commit vào repo).
 
 ---
 
@@ -144,6 +159,6 @@ _(viết 3–5 câu: phần nào tốn thời gian nhất, vì sao — ví dụ:
 
 - **Ingestion & Orchestration** (IP01–IP02): `event_headers`, kiểm DAG `lab28_ingestion_pipeline`, replay/DLQ qua J2.
 - **Data & ML** (IP03–IP04–IP06): `dedupe_latest`, `feast_online_request`, `lab28 release` (v1→v3), Delta time travel.
-- **Serving & Retrieval** (IP05–IP07): `lab28 index`, grounding path, degraded behavior khi vLLM `ConnectError`.
+- **Serving & Retrieval** (IP05–IP07): `lab28 index`, grounding path, dựng vLLM 0.10.1.1 thật trên Kaggle T4 + Cloudflare tunnel, verify identity (`/version`, `/v1/models`, 61 metric `vllm:`), chạy J1/J3 với completion thật.
 - **Platform & Observability** (IP08–IP10): `readiness_status`, gateway 200/429, Prometheus targets, OTLP trace, validate manifest K8s/GitOps.
 - **Presenter / Incident Commander**: evidence pack, kịch bản demo, tường thuật sự cố (mục 5).

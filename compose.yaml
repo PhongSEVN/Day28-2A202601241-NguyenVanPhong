@@ -224,6 +224,9 @@ services:
       LAB28_VLLM_BASE_URL: ${LAB28_VLLM_BASE_URL:-http://host.docker.internal:8001/v1}
       LAB28_VLLM_MODEL_ID: ${LAB28_VLLM_MODEL_ID:-Qwen/Qwen3-1.7B}
       LAB28_VLLM_REQUIRE_REAL: ${LAB28_VLLM_REQUIRE_REAL:-false}
+      # A remote (tunnelled) vLLM has higher RTT than a local GPU; the 30 s
+      # default is tuned for a co-located endpoint. Override via ports.local.
+      LAB28_VLLM_TIMEOUT: ${LAB28_VLLM_TIMEOUT:-30}
       OTEL_SERVICE_NAME: lab28-api
     ports:
       - "${LAB28_API_PORT:-8000}:8000"
